@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -60,20 +59,19 @@ class Action:
 def filter_active(
     linux: dict[str, SessionRef],
     mac: dict[str, SessionRef],
-    cutoff_ms: int,
+    live: dict[str, dict],
 ) -> int:
-    """Drop sessions active after cutoff (likely open in the app right now) so a
-    sync never races the session you're using. Mutates both dicts; returns count."""
+    """Drop sessions a LIVE cc process is currently running (from `live`), so a
+    sync never races an attached/running session. A session that was merely active
+    recently but has no live process is NOT skipped. Mutates both dicts; returns
+    count."""
     skipped = 0
     for uuid in sorted(set(linux) | set(mac)):
-        # use transcript activity only — file mtime is bumped by our own writes
-        la = linux[uuid].activity_ms if uuid in linux else 0
-        ma = mac[uuid].activity_ms if uuid in mac else 0
-        last = max(la, ma)
-        if last > cutoff_ms:
-            side = "linux-transcript" if la >= ma else "mac-index"
-            log.info("skip %s active_ms=%d via=%s (cutoff_ms=%d, %.1f min inside window)",
-                     uuid[:8], last, side, cutoff_ms, (last - cutoff_ms) / 60000)
+        if uuid in live:
+            info = live[uuid]
+            log.info("skip %s — live cc process (pid=%s status=%s kind=%s)",
+                     uuid[:8], info.get("pid"), info.get("status"),
+                     info.get("kind") or info.get("via"))
             linux.pop(uuid, None)
             mac.pop(uuid, None)
             skipped += 1
@@ -218,9 +216,9 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False) -> Summary:
     mac, e2 = harvest.mac_manifest(cfg)
     summ.errors += e1 + e2
 
-    if cfg.skip_active_minutes:
-        cutoff = int((time.time() - cfg.skip_active_minutes * 60) * 1000)
-        summ.skipped += filter_active(linux, mac, cutoff)
+    if cfg.skip_live:
+        live = ssh.live_sessions(cfg)   # sessions a live cc process is running
+        summ.skipped += filter_active(linux, mac, live)
 
     try:
         reconcile_titles(cfg, linux, mac, store, summ, dry_run)

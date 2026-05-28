@@ -55,9 +55,12 @@ entries this tool created (`--keep-sessions` leaves the sidebar untouched).
 Three states: **OK** / **Syncing** / **Cannot connect**. A failed sync shows a **Retry**
 button (no automatic immediate retry); the scheduled tick still runs. Completion shows a
 summary in the menu and a notification. Legend: `↓` surfaced on Mac · `↑` pushed to Linux ·
-`=` unchanged · `✎` renamed · `⏭` live session skipped · `⊘` Mac entry with no Linux
-session in scope (orphan — not live). Only genuine `⏭` live skips trigger the "Sync now ·
-N live skipped" nudge.
+`=` unchanged · `✎` renamed · `⤺` app-born entry handed back to the app · `⏭` skipped
+because a live cc process is currently running it · `⊘` Mac entry with no Linux session in
+scope (orphan). "Live" is process-based — a session is skipped only while an actual cc
+process holds it (`~/.claude/sessions/<PID>.json` markers / `--resume` in the process
+table), never merely because it was recently active. Only `⏭` live skips trigger the
+"Sync now · N live skipped" nudge.
 
 ## Tests
 
