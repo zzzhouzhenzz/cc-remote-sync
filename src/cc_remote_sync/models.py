@@ -18,5 +18,6 @@ class SessionRef:
     content_hash: str
     activity_ms: int = 0          # transcript time ONLY (0 if unknown) — the live signal
     schema: str = "unknown"       # "cli" | "desktop" | "unknown"
+    app_born: bool = False        # created in the Claude app (first entrypoint claude-desktop)
     archived: bool = False        # mac side only
     slug: str = ""                # linux project dir name

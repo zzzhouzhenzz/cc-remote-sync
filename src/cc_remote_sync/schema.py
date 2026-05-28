@@ -67,14 +67,25 @@ class Meta:
     cwd: str | None
     turns: int
     last_activity_ms: int
+    born: str | None = None    # the FIRST entrypoint seen = how the session was created
+
+
+def is_app_born(meta: "Meta") -> bool:
+    """True if the session was CREATED in the Claude app (first entrypoint
+    'claude-desktop'). Such a session is already in the app's sidebar — the tool
+    does not surface it; it only pushes a CLI-resumable copy to Linux. A session
+    born in the terminal ('cli') and later opened in the app stays CLI-born."""
+    return meta.born == "claude-desktop"
 
 
 def extract_meta(records: list[dict]) -> Meta:
-    title = model = cwd = None
+    title = model = cwd = born = None
     turns = 0
     last_ms = 0
     for r in records:
         t = r.get("type")
+        if born is None and r.get("entrypoint"):
+            born = r["entrypoint"]
         if t == "custom-title":
             title = r.get("customTitle") or title
         if not cwd and r.get("cwd"):
@@ -90,7 +101,7 @@ def extract_meta(records: list[dict]) -> Meta:
         if t == "assistant" and isinstance(r.get("message"), dict):
             model = r["message"].get("model") or model
         last_ms = max(last_ms, _ts_to_ms(r.get("timestamp")))
-    return Meta(title, model, cwd, turns, last_ms)
+    return Meta(title, model, cwd, turns, last_ms, born)
 
 
 def _first_text(content) -> str | None:

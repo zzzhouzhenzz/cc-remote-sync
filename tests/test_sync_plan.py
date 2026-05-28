@@ -7,11 +7,11 @@ from cc_remote_sync.sync import plan
 
 
 def ref(uuid, side, *, schema="cli", h="h", last=100, archived=False,
-        cwd="/home/zz/ml"):
+        cwd="/home/zz/ml", app_born=False):
     return SessionRef(uuid=uuid, side=side, cwd=cwd, title="t", model="m",
                       last_activity_ms=last, turns=1,
                       transcript_path=Path(f"/tmp/{uuid}.jsonl"),
-                      content_hash=h, schema=schema, archived=archived)
+                      content_hash=h, schema=schema, archived=archived, app_born=app_born)
 
 
 def store_with(*records) -> Store:
@@ -30,10 +30,26 @@ def test_new_linux_session_is_surfaced():
     assert kinds(acts, "u") == {"surface"}
 
 
-def test_new_desktop_session_also_gets_resume_fix():
-    acts = plan({"u": ref("u", "linux", schema="desktop")}, {}, store_with(),
+def test_app_born_session_is_not_surfaced_but_resume_fixed():
+    # app-born + desktop schema: don't surface (already in the app), push CLI copy to Linux
+    acts = plan({"u": ref("u", "linux", schema="desktop", app_born=True)}, {}, store_with(),
                 propagate_deletions=True)
-    assert kinds(acts, "u") == {"surface", "resume_fix"}
+    assert kinds(acts, "u") == {"resume_fix"}
+
+
+def test_app_born_already_cli_resumable_is_left_alone():
+    # app-born already in CLI schema: nothing to do (in the app + terminal-resumable)
+    acts = plan({"u": ref("u", "linux", schema="cli", app_born=True)}, {}, store_with(),
+                propagate_deletions=True)
+    assert kinds(acts, "u") == set()
+
+
+def test_app_born_hijacked_entry_is_relinquished():
+    # we previously surfaced an app-born session -> hand it back to the app
+    s = store_with(Record(uuid="u", linux=SideState(hash="h"), mac=SideState(hash="h")))
+    acts = plan({"u": ref("u", "linux", schema="cli", app_born=True)},
+                {"u": ref("u", "mac")}, s, propagate_deletions=True)
+    assert kinds(acts, "u") == {"relinquish"}
 
 
 def test_deleted_on_mac_propagates_to_linux():

@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import harvest, index_writer, paths, schema, ssh
+from . import harvest, index_writer, paths, schema, ssh, teardown
 from .config import Config
 from .models import SessionRef
 from .store import Record, SideState, Store
@@ -27,12 +27,15 @@ class Summary:
     skipped: int = 0      # LIVE sessions skipped (active within the window)
     no_source: int = 0    # Mac entries with no Linux session in scope (orphans) — not live
     renamed: int = 0      # titles reconciled either direction
+    relinquished: int = 0  # app-born entries handed back to the app (un-hijacked)
     errors: list[str] = field(default_factory=list)
 
     def line(self) -> str:
         s = f"{self.created}↓ {self.pushed}↑ {self.unchanged}="
         if self.renamed:
             s += f" {self.renamed}✎"
+        if self.relinquished:
+            s += f" {self.relinquished}⤺"
         if self.skipped:
             s += f" {self.skipped}⏭"      # live
         if self.no_source:
@@ -158,8 +161,19 @@ def plan(
                 continue
             # else: resurrected -> fall through as if new
 
+        # APP-BORN: already in the app's sidebar. Never surface. Push a CLI-resumable
+        # copy to Linux (so `claude --resume` works), and hand back any entry we may
+        # have hijacked in an earlier version.
+        if L and L.app_born:
+            if L.schema == "desktop":
+                actions.append(Action("resume_fix", uuid, L, "app-born: make terminal-resumable"))
+            if M:
+                actions.append(Action("relinquish", uuid, L, "app-born: hand back to the app"))
+            continue
+
         synced_before = bool(S and (S.linux or S.mac) and not (S and S.tombstone_side))
 
+        # CLI-BORN: surface in the app; two-way thereafter.
         if L and not M:
             if synced_before and S and S.mac:
                 # was on Mac, user removed it there -> delete on Linux
@@ -168,9 +182,7 @@ def plan(
                 else:
                     actions.append(Action("noop", uuid, L, "mac-deleted, propagation off"))
             else:
-                actions.append(Action("surface", uuid, L, "new on Linux"))
-                if L.schema == "desktop":
-                    actions.append(Action("resume_fix", uuid, L, "desktop schema on Linux"))
+                actions.append(Action("surface", uuid, L, "new CLI session"))
             continue
 
         if M and not L:
@@ -186,12 +198,8 @@ def plan(
                     actions.append(Action("delete_linux", uuid, L, "archived in Mac app"))
                 continue
             changed = not (S and S.linux and S.linux.hash == L.content_hash)
-            if changed:
-                actions.append(Action("update", uuid, L, "Linux content changed"))
-            else:
-                actions.append(Action("noop", uuid, L, "unchanged"))
-            if L.schema == "desktop":
-                actions.append(Action("resume_fix", uuid, L, "desktop schema on Linux"))
+            actions.append(Action("update", uuid, L, "Linux content changed") if changed
+                           else Action("noop", uuid, L, "unchanged"))
             continue
 
     return actions
@@ -270,6 +278,21 @@ def _apply(cfg: Config, store: Store, a: Action, summ: Summary, dry_run: bool) -
         if not dry_run:
             _resume_fix(cfg, a.ref)
         summ.pushed += 1
+        return
+
+    if a.kind == "relinquish":
+        # app-born session we'd hijacked: restore the genuine entry if we backed one
+        # up, else just remove ours and let the app re-assert its native entry.
+        log.info("relinquish %s (%s)", a.uuid, a.reason)
+        if not dry_run:
+            original = teardown._original_backup(a.uuid)
+            if original:
+                import shutil as _sh
+                _sh.copy2(original, paths.index_entry_path(cfg.org, cfg.acct, a.uuid))
+            else:
+                index_writer.remove_entry(cfg, a.uuid)
+            store.records.pop(a.uuid, None)
+        summ.relinquished += 1
         return
 
     if a.kind == "delete_linux":

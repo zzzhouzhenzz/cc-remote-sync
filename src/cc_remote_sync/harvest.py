@@ -45,6 +45,7 @@ def linux_manifest(cfg: Config) -> tuple[dict[str, SessionRef], list[str]]:
             transcript_path=jsonl,
             content_hash=schema.content_hash(jsonl),
             schema=schema.detect_schema(records),
+            app_born=schema.is_app_born(meta),
             slug=slug,
         )
     return out, errors
@@ -67,6 +68,8 @@ def mac_manifest(cfg: Config) -> tuple[dict[str, SessionRef], list[str]]:
         ssh = d.get("sshConfig") or {}
         if ssh.get("id") != want_host_id:
             continue  # not bound to our Linux host -> out of scope
+        if ssh.get("source") != "cc-remote-sync":
+            continue  # native app session — the app owns it, not us (never in our scope)
         uuid = d.get("cliSessionId")
         if not uuid:
             continue

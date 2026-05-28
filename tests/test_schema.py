@@ -5,7 +5,7 @@ CLI_RECORDS = [
     {"type": "custom-title", "customTitle": "My Session", "sessionId": "s1"},
     {"type": "mode", "mode": "default", "sessionId": "s1"},
     {"type": "user", "cwd": "/home/zz/ml", "timestamp": "2026-05-01T10:00:00Z",
-     "message": {"content": "hello there"}},
+     "entrypoint": "cli", "message": {"content": "hello there"}},
     {"type": "assistant", "timestamp": "2026-05-01T10:00:05Z",
      "message": {"model": "claude-opus-4-8", "content": [{"type": "text", "text": "hi"}]}},
 ]
@@ -14,7 +14,7 @@ DESKTOP_RECORDS = [
     {"type": "queue-operation", "operation": "enqueue", "content": "do x", "sessionId": "s2"},
     {"type": "queue-operation", "operation": "dequeue", "sessionId": "s2"},
     {"type": "user", "cwd": "/home/zz/ml", "timestamp": "2026-05-02T09:00:00Z",
-     "message": {"content": "first prompt here"}},
+     "entrypoint": "claude-desktop", "message": {"content": "first prompt here"}},
     {"type": "assistant", "timestamp": "2026-05-02T09:01:00Z",
      "message": {"model": "claude-opus-4-7", "content": [{"type": "text", "text": "ok"}]}},
 ]
@@ -40,6 +40,26 @@ def test_extract_meta_title_fallback_from_first_prompt():
     # no custom-title -> falls back to first user prompt
     assert m.title == "first prompt here"
     assert m.model == "claude-opus-4-7"
+
+
+def test_born_and_app_born():
+    assert schema.extract_meta(CLI_RECORDS).born == "cli"
+    assert schema.extract_meta(DESKTOP_RECORDS).born == "claude-desktop"
+    assert not schema.is_app_born(schema.extract_meta(CLI_RECORDS))
+    assert schema.is_app_born(schema.extract_meta(DESKTOP_RECORDS))
+
+
+def test_born_is_first_entrypoint_not_the_set():
+    # born in terminal, later opened in the app -> still CLI-born (first entrypoint wins)
+    recs = [
+        {"type": "user", "entrypoint": "cli", "timestamp": "2026-05-01T10:00:00Z",
+         "message": {"content": "x"}},
+        {"type": "user", "entrypoint": "claude-desktop", "timestamp": "2026-05-02T10:00:00Z",
+         "message": {"content": "y"}},
+    ]
+    m = schema.extract_meta(recs)
+    assert m.born == "cli"
+    assert not schema.is_app_born(m)
 
 
 def test_to_cli_records_strips_queue_ops_and_adds_title():
