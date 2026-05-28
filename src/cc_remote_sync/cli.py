@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sys
 
-from . import config, harvest, paths, ssh, sync
+from . import config, harvest, paths, ssh, sync, teardown
 from .store import Store
 
 
@@ -62,6 +63,16 @@ def cmd_list(args) -> int:
     return 0
 
 
+def cmd_reset(args) -> int:
+    """Revert every entry we wrote and wipe our state — back to a clean slate."""
+    cfg = config.load()
+    store = Store(paths.STORE_PATH).load()
+    restored, removed = teardown.revert_index(cfg, store)
+    shutil.rmtree(paths.STATE_DIR, ignore_errors=True)  # backups read above, safe to wipe now
+    print(f"reset: {restored} real entries restored, {removed} forged entries removed; state wiped")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _setup_logging()
     p = argparse.ArgumentParser(prog="cc-remote-sync")
@@ -73,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("status", help="show config + connection").set_defaults(func=cmd_status)
     sub.add_parser("list", help="list Linux sessions in scope").set_defaults(func=cmd_list)
+    sub.add_parser("reset", help="revert all synced entries + wipe state").set_defaults(func=cmd_reset)
 
     args = p.parse_args(argv)
     return args.func(args)
