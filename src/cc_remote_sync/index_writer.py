@@ -45,6 +45,8 @@ def write_entry(cfg: Config, ref: SessionRef) -> Path:
         "completedTurns": ref.turns,
         "isArchived": existing.get("isArchived", False),
         "permissionMode": existing.get("permissionMode", "default"),
+        "effort": existing.get("effort", "high"),
+        "chromePermissionMode": existing.get("chromePermissionMode", "skip_all_permission_checks"),
         "remoteMcpServersConfig": existing.get("remoteMcpServersConfig", []),
         "sshConfig": {**cfg.ssh_config, "source": "cc-remote-sync"},
     }
