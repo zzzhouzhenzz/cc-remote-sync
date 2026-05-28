@@ -4,6 +4,7 @@ can be unit-tested without touching SSH or the filesystem."""
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -42,6 +43,26 @@ class Action:
     uuid: str
     ref: SessionRef | None = None
     reason: str = ""
+
+
+def filter_active(
+    linux: dict[str, SessionRef],
+    mac: dict[str, SessionRef],
+    cutoff_ms: int,
+) -> int:
+    """Drop sessions active after cutoff (likely open in the app right now) so a
+    sync never races the session you're using. Mutates both dicts; returns count."""
+    skipped = 0
+    for uuid in set(linux) | set(mac):
+        last = max(
+            linux[uuid].last_activity_ms if uuid in linux else 0,
+            mac[uuid].last_activity_ms if uuid in mac else 0,
+        )
+        if last > cutoff_ms:
+            linux.pop(uuid, None)
+            mac.pop(uuid, None)
+            skipped += 1
+    return skipped
 
 
 def plan(
@@ -117,6 +138,10 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False) -> Summary:
     linux, e1 = harvest.linux_manifest(cfg)
     mac, e2 = harvest.mac_manifest(cfg)
     summ.errors += e1 + e2
+
+    if cfg.skip_active_minutes:
+        cutoff = int((time.time() - cfg.skip_active_minutes * 60) * 1000)
+        summ.skipped += filter_active(linux, mac, cutoff)
 
     actions = plan(linux, mac, store, propagate_deletions=cfg.propagate_deletions != "off")
 
