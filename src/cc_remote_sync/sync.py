@@ -60,18 +60,22 @@ def filter_active(
     linux: dict[str, SessionRef],
     mac: dict[str, SessionRef],
     live: dict[str, dict],
+    max_idle_seconds: int,
 ) -> int:
-    """Drop sessions a LIVE cc process is currently running (from `live`), so a
-    sync never races an attached/running session. A session that was merely active
-    recently but has no live process is NOT skipped. Mutates both dicts; returns
-    count."""
+    """Drop sessions a cc process is ACTIVELY running, so a sync never races a
+    session in use. "Active" = the marker reports a live status (busy/waiting/...)
+    OR it heartbeated within max_idle_seconds. A process that is alive but reports
+    no status and hasn't heartbeated (a stale/lingering ccd-cli), or a session with
+    no process at all, is NOT skipped. Mutates both dicts; returns count."""
     skipped = 0
     for uuid in sorted(set(linux) | set(mac)):
-        if uuid in live:
-            info = live[uuid]
-            log.info("skip %s — live cc process (pid=%s status=%s kind=%s)",
-                     uuid[:8], info.get("pid"), info.get("status"),
-                     info.get("kind") or info.get("via"))
+        info = live.get(uuid)
+        if not info:
+            continue
+        has_status = info.get("status") not in ("-", "", None)
+        if has_status or info["idle_seconds"] <= max_idle_seconds:
+            log.info("skip %s — active cc process (pid=%s status=%s last-active=%ss)",
+                     uuid[:8], info.get("pid"), info.get("status"), info["idle_seconds"])
             linux.pop(uuid, None)
             mac.pop(uuid, None)
             skipped += 1
@@ -217,8 +221,8 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False) -> Summary:
     summ.errors += e1 + e2
 
     if cfg.skip_live:
-        live = ssh.live_sessions(cfg)   # sessions a live cc process is running
-        summ.skipped += filter_active(linux, mac, live)
+        live = ssh.live_sessions(cfg)   # sessions with a live, heartbeating cc process
+        summ.skipped += filter_active(linux, mac, live, cfg.live_idle_seconds)
 
     try:
         reconcile_titles(cfg, linux, mac, store, summ, dry_run)

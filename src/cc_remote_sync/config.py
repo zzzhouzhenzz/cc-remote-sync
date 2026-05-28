@@ -26,7 +26,8 @@ class Config:
     auto_sync: bool = True
     interval: str = "daily"   # daily | 6h | 1h | manual
     propagate_deletions: str = "trash"  # trash | off
-    skip_live: bool = True  # skip sessions a live cc process is currently running (process-based)
+    skip_live: bool = True  # skip sessions an actively-running cc process is holding
+    live_idle_seconds: int = 300  # a live process counts as "active" if it heartbeated this recently
     skip_active_minutes: int = 10  # deprecated: old time-based heuristic, kept for config back-compat
     ssh_user_host: str = ""   # for ssh/rsync, e.g. "user@your-linux-host"
     ssh_port: int = 22

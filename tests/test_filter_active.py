@@ -13,42 +13,62 @@ def ref(uuid):
                       transcript_path=Path("/tmp/x"), content_hash="h")
 
 
-def test_skips_only_sessions_with_a_live_process():
-    linux = {"running": ref("running"), "idle": ref("idle")}
-    mac = {"running": ref("running")}
-    live = {"running": {"pid": 12660, "status": "busy", "kind": "interactive"}}
-    skipped = filter_active(linux, mac, live)
+IDLE = 300
+
+
+def test_active_status_is_skipped_even_when_heartbeat_is_old():
+    # 837d107f: busy interactive session whose marker last updated 303s ago -> SKIP
+    linux = {"busy": ref("busy"), "stale": ref("stale"), "idle": ref("idle")}
+    mac = {"busy": ref("busy")}
+    live = {
+        "busy":  {"idle_seconds": 303, "status": "busy", "pid": "12660"},   # active status
+        "stale": {"idle_seconds": 5072, "status": "-", "pid": "5358"},      # no status, idle 84m
+    }
+    skipped = filter_active(linux, mac, live, IDLE)
     assert skipped == 1
-    assert "running" not in linux and "running" not in mac   # live -> skipped
-    assert "idle" in linux                                   # no process -> synced
+    assert "busy" not in linux and "busy" not in mac   # active status -> skipped
+    assert "stale" in linux                            # lingering -> synced
+    assert "idle" in linux                             # no process -> synced
 
 
-def test_recently_active_but_no_process_is_not_skipped():
-    # the user's case: used 4 min ago, now detached -> not in live set -> NOT skipped
+def test_no_status_but_fresh_heartbeat_is_skipped():
+    # a status-less marker (old ccd-cli) that DID just heartbeat -> still active -> skip
+    linux = {"u": ref("u")}
+    filter_active(linux, {}, {"u": {"idle_seconds": 40, "status": "-", "pid": "9"}}, IDLE)
+    assert "u" not in linux
+
+
+def test_no_status_and_stale_heartbeat_is_synced():
+    linux = {"u": ref("u")}
+    filter_active(linux, {}, {"u": {"idle_seconds": 5072, "status": "-", "pid": "9"}}, IDLE)
+    assert "u" in linux  # alive but no status + idle 84min -> not actively running -> synced
+
+
+def test_no_process_is_never_skipped():
+    # the user's e1493430 case: used 4 min ago, detached, no process -> NOT skipped
     linux = {"e1493430": ref("e1493430")}
-    assert filter_active(linux, {}, live={}) == 0
+    assert filter_active(linux, {}, live={}, max_idle_seconds=IDLE) == 0
     assert "e1493430" in linux
 
 
-# --- live-session probe parsing (pure) ---
+# --- live-session probe parsing (pure): "<uuid> <idle> <status> <kind> <pid>" ---
 
-MARKERS = (
-    '{"pid":12660,"sessionId":"837d107f-0611-4579-9673-96d654740894","status":"busy","kind":"interactive"}\n'
-    '{"pid":5358,"sessionId":"e6d1438b-d8df-42dd-ab49-e334a4aaff7c","kind":"interactive"}\n'
-    '--resume e4c6802f-5919-4607-b0e9-c38d1f6760f2\n'
+PROBE = (
+    "837d107f-0611-4579-9673-96d654740894 83 busy interactive 12660\n"
+    "e6d1438b-d8df-42dd-ab49-e334a4aaff7c 5072 - interactive 5358\n"
 )
 
 
-def test_parse_live_from_markers_and_resume_args():
-    live = _parse_live(MARKERS)
+def test_parse_live_probe_lines():
+    live = _parse_live(PROBE)
     assert set(live) == {
         "837d107f-0611-4579-9673-96d654740894",
         "e6d1438b-d8df-42dd-ab49-e334a4aaff7c",
-        "e4c6802f-5919-4607-b0e9-c38d1f6760f2",
     }
-    assert live["837d107f-0611-4579-9673-96d654740894"]["status"] == "busy"
-    assert live["e4c6802f-5919-4607-b0e9-c38d1f6760f2"]["via"] == "--resume"
+    assert live["837d107f-0611-4579-9673-96d654740894"] == {
+        "idle_seconds": 83, "status": "busy", "kind": "interactive", "pid": "12660"}
+    assert live["e6d1438b-d8df-42dd-ab49-e334a4aaff7c"]["idle_seconds"] == 5072
 
 
 def test_parse_live_ignores_garbage():
-    assert _parse_live("not json\n\n{bad}\n") == {}
+    assert _parse_live("not a uuid line\n\nfoo bar\n") == {}

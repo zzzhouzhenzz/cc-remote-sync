@@ -79,39 +79,55 @@ def push_file(cfg: Config, local: Path, remote_rel: str) -> None:
         raise Unreachable(f"rsync push failed: {r.stderr.strip()}")
 
 
+# Remote probe: for each session marker whose PID is ALIVE, emit
+# "<sessionId> <seconds_since_last_heartbeat> <status> <kind> <pid>".
+# Heartbeat = max(marker.updatedAt, marker file mtime) — works whether or not the
+# cc version writes updatedAt. Staleness is computed on Linux to avoid clock skew.
+_LIVE_PROBE = (
+    "import json,glob,os,time\n"
+    "now=time.time()\n"
+    'for f in glob.glob(os.path.expanduser("~/.claude/sessions/*.json")):\n'
+    " b=os.path.basename(f)[:-5]\n"
+    " if not b.isdigit(): continue\n"
+    " try: os.kill(int(b),0)\n"
+    " except OSError: continue\n"
+    " try: d=json.load(open(f))\n"
+    " except Exception: continue\n"
+    ' sid=d.get("sessionId")\n'
+    " if not sid: continue\n"
+    ' upd=(d.get("updatedAt") or 0)/1000.0\n'
+    " hb=max(upd, os.path.getmtime(f))\n"
+    ' print(sid, int(now-hb), d.get("status") or "-", d.get("kind") or "-", b)\n'
+)
+
+
 def _parse_live(output: str) -> dict[str, dict]:
-    """Parse the live-session probe output into {uuid: marker_info}. Pure, tested."""
+    """Parse probe lines '<uuid> <idle_seconds> <status> <kind> <pid>'. Pure, tested."""
     live: dict[str, dict] = {}
     for line in output.splitlines():
-        line = line.strip()
-        if line.startswith("{"):
-            try:
-                d = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            sid = d.get("sessionId")
-            if sid:
-                live[sid] = {"pid": d.get("pid"), "status": d.get("status"),
-                             "kind": d.get("kind")}
-        else:
-            m = re.search(rf"--resume ({_UUID})", line)
-            if m:
-                live.setdefault(m.group(1), {"via": "--resume"})
+        parts = line.split()
+        if len(parts) < 2 or not re.fullmatch(_UUID, parts[0]):
+            continue
+        try:
+            idle = int(parts[1])
+        except ValueError:
+            continue
+        live[parts[0]] = {
+            "idle_seconds": idle,
+            "status": parts[2] if len(parts) > 2 else "-",
+            "kind": parts[3] if len(parts) > 3 else "-",
+            "pid": parts[4] if len(parts) > 4 else None,
+        }
     return live
 
 
 def live_sessions(cfg: Config) -> dict[str, dict]:
-    """Sessions a LIVE cc process is currently running on Linux. The truth source
-    is ~/.claude/sessions/<PID>.json markers (one per running process) cross-checked
-    against PID liveness, plus any '--resume <uuid>' in the process table. This is
-    'attached/running', NOT 'recently active' — an idle, detached session is absent."""
-    cmd = (
-        'for f in ~/.claude/sessions/*.json; do [ -f "$f" ] || continue; '
-        'pid=$(basename "$f" .json); kill -0 "$pid" 2>/dev/null && cat "$f" && echo; done; '
-        "ps -eo args 2>/dev/null | grep -oE -- '--resume [0-9a-f-]{36}'"
-    )
-    rc, out, err = run_remote(cfg, cmd)
-    if rc not in (0, 1):  # grep exits 1 when no --resume matches; that's fine
+    """Sessions a live, HEARTBEATING cc process is running on Linux, with how long
+    since each last heartbeat. A process that is alive but not heartbeating (a stale,
+    lingering ccd-cli) reports a large idle_seconds and is treated as not-running by
+    the caller. Source: ~/.claude/sessions/<PID>.json markers + PID liveness."""
+    rc, out, err = run_remote(cfg, f"python3 -c '{_LIVE_PROBE}'")
+    if rc != 0:
         raise Unreachable(f"live-session probe failed: {err.strip()}")
     return _parse_live(out)
 
