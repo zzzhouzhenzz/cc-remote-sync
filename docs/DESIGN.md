@@ -21,7 +21,7 @@ only holds transcript caches. The real index is the Electron store:
   — one entry per session, carrying `cliSessionId`, `cwd`, `title`, `model`,
   `completedTurns`, `isArchived`, and an **`sshConfig` binding** (the resume target).
 - `~/Library/Application Support/Claude/ssh_configs.json` — SSH hosts. The owner already
-  has `Linux-4090 → zz@zz-machine.ddns.net:63330`.
+  has a host configured, e.g. `Linux-4090 → user@your-linux-host:<port>`.
 - `~/.claude/projects/ssh-<uuid>/<uuid>.jsonl` — transcript cache (desktop
   `queue-operation` schema) for display.
 

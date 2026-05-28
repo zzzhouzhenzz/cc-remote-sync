@@ -21,12 +21,12 @@ class Config:
     ssh_config: dict          # the Linux-4090 binding, embedded into index entries
     org: str                  # claude-code-sessions/<org>/<acct>
     acct: str
-    remote_home: str = "/home/zz"
+    remote_home: str = "/home/user"   # overridden by bootstrap() from the SSH user
     scope_days: int = 60
     auto_sync: bool = True
     interval: str = "daily"   # daily | 6h | 1h | manual
     propagate_deletions: str = "trash"  # trash | off
-    ssh_user_host: str = ""   # for ssh/rsync, e.g. "zz@zz-machine.ddns.net"
+    ssh_user_host: str = ""   # for ssh/rsync, e.g. "user@your-linux-host"
     ssh_port: int = 22
 
     def save(self) -> None:
@@ -71,7 +71,7 @@ def bootstrap() -> Config:
     """First run: derive everything from the app's own store and persist it."""
     ssh = _discover_ssh_config()
     org, acct = _discover_org_acct()
-    user_host = ssh.sshHost            # "zz@zz-machine.ddns.net"
+    user_host = ssh.sshHost            # "user@your-linux-host"
     cfg = Config(
         ssh_config=asdict(ssh),
         org=org,
