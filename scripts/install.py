@@ -25,12 +25,18 @@ def main():
     # 2. build .app — py2app rejects PEP 621 deps, so hide pyproject during build
     pyproject = ROOT / "pyproject.toml"
     hidden = ROOT / "_pyproject.toml.hidden"
+    if hidden.exists() and not pyproject.exists():
+        hidden.rename(pyproject)        # recover from a previously aborted build
     run(["rm", "-rf", str(ROOT / "build"), str(ROOT / "dist")])
-    pyproject.rename(hidden)
+    moved = False
+    if pyproject.exists():
+        pyproject.rename(hidden)
+        moved = True
     try:
         run([sys.executable, "setup.py", "py2app"], cwd=ROOT)
     finally:
-        hidden.rename(pyproject)
+        if moved and hidden.exists():
+            hidden.rename(pyproject)
 
     built = ROOT / "dist" / APP_NAME
     if not built.exists():
