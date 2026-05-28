@@ -42,7 +42,8 @@ class CCRemoteSync(rumps.App):
                          quit_button="Quit")
         self.cfg = config.load()
         self._busy = False
-        self._result = None  # set by worker thread, drained on main thread
+        self._result = None       # set by worker thread, drained on main thread
+        self._did_initial = False  # one sync shortly after launch (fresh-start UX)
 
         self.status_item = rumps.MenuItem("Idle")
         self.action_item = rumps.MenuItem("Sync now", callback=self.sync_now)
@@ -99,6 +100,11 @@ class CCRemoteSync(rumps.App):
             self._result = ("crash", e)
 
     def _drain(self, _):
+        if not self._did_initial:
+            self._did_initial = True
+            if self.cfg.auto_sync:
+                self.sync_now()       # first sync ~0.4s after launch
+            return
         if self._result is None:
             return
         kind, payload = self._result
