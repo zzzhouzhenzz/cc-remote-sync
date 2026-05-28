@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cc-remote-sync"
+version = "0.1.0"
+description = "Surface Linux terminal Claude Code sessions in the macOS app, two-way."
+requires-python = ">=3.11"
+dependencies = ["rumps>=0.4"]
+
+[project.scripts]
+cc-remote-sync = "cc_remote_sync.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["cc_remote_sync"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
