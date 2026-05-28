@@ -100,7 +100,15 @@ class CCRemoteSync(rumps.App):
         self._busy = False
         if kind == "ok":
             self._set_state("ok", "✓ " + payload.line())
-            rumps.notification("cc-remote-sync", "Sync complete", payload.line())
+            if payload.skipped:
+                # a session was live and got skipped -> nudge manual sync
+                self.action_item.title = f"Sync now · {payload.skipped} live skipped"
+                rumps.notification(
+                    "cc-remote-sync", "Sync complete",
+                    f"{payload.line()}\n{payload.skipped} live session(s) skipped — "
+                    "Sync now once they're idle.")
+            else:
+                rumps.notification("cc-remote-sync", "Sync complete", payload.line())
         elif kind == "error":
             self._set_state("error", f"⚠ Can't reach {self.cfg.ssh_config.get('name')}")
             rumps.notification("cc-remote-sync", "Cannot connect", str(payload))

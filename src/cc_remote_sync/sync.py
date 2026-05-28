@@ -28,6 +28,8 @@ class Summary:
 
     def line(self) -> str:
         s = f"{self.created}↓ {self.pushed}↑ {self.unchanged}="
+        if self.skipped:
+            s += f" {self.skipped}⏭"
         if self.deleted:
             s += f" {self.deleted}✗"
         if self.errors:
