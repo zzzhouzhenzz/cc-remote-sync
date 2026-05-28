@@ -37,16 +37,18 @@ cc-remote-sync sync                    # do it
 python -m cc_remote_sync.app           # run the menu-bar app (dev)
 ```
 
-## Build the .app (menu-bar app, launches at login)
+## Install / uninstall (menu-bar app, launches at login)
 
 ```bash
 pip install py2app
-mv pyproject.toml _bak && python setup.py py2app; mv _bak pyproject.toml  # py2app rejects PEP 621 deps
-cp -R dist/cc-remote-sync.app /Applications/
-open /Applications/cc-remote-sync.app
-# add to Login Items (hidden):
-osascript -e 'tell application "System Events" to make login item at end with properties {path:"/Applications/cc-remote-sync.app", hidden:true}'
+python scripts/install.py      # icons -> .app -> /Applications -> login item -> launch
+python scripts/uninstall.py    # quit, remove app + login item, revert synced entries, wipe state
 ```
+
+`install.py` is idempotent (re-run to upgrade). The app runs one sync ~0.4s after
+launch, so a fresh install populates the sidebar immediately rather than waiting for
+the daily timer. `uninstall.py` restores genuine app sessions and removes only the
+entries this tool created (`--keep-sessions` leaves the sidebar untouched).
 
 ## Menu-bar app
 
