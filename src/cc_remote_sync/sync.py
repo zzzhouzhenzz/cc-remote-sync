@@ -24,7 +24,8 @@ class Summary:
     pushed: int = 0       # resume-fix copies sent to Linux (up arrow)
     deleted: int = 0      # deletions propagated
     unchanged: int = 0    # equals
-    skipped: int = 0
+    skipped: int = 0      # LIVE sessions skipped (active within the window)
+    no_source: int = 0    # Mac entries with no Linux session in scope (orphans) — not live
     renamed: int = 0      # titles reconciled either direction
     errors: list[str] = field(default_factory=list)
 
@@ -33,7 +34,9 @@ class Summary:
         if self.renamed:
             s += f" {self.renamed}✎"
         if self.skipped:
-            s += f" {self.skipped}⏭"
+            s += f" {self.skipped}⏭"      # live
+        if self.no_source:
+            s += f" {self.no_source}⊘"    # mac-only, no Linux source
         if self.deleted:
             s += f" {self.deleted}✗"
         if self.errors:
@@ -59,13 +62,15 @@ def filter_active(
     """Drop sessions active after cutoff (likely open in the app right now) so a
     sync never races the session you're using. Mutates both dicts; returns count."""
     skipped = 0
-    for uuid in set(linux) | set(mac):
+    for uuid in sorted(set(linux) | set(mac)):
         # use transcript activity only — file mtime is bumped by our own writes
-        last = max(
-            linux[uuid].activity_ms if uuid in linux else 0,
-            mac[uuid].activity_ms if uuid in mac else 0,
-        )
+        la = linux[uuid].activity_ms if uuid in linux else 0
+        ma = mac[uuid].activity_ms if uuid in mac else 0
+        last = max(la, ma)
         if last > cutoff_ms:
+            side = "linux-transcript" if la >= ma else "mac-index"
+            log.info("skip %s active_ms=%d via=%s (cutoff_ms=%d, %.1f min inside window)",
+                     uuid[:8], last, side, cutoff_ms, (last - cutoff_ms) / 60000)
             linux.pop(uuid, None)
             mac.pop(uuid, None)
             skipped += 1
@@ -247,7 +252,7 @@ def _apply(cfg: Config, store: Store, a: Action, summ: Summary, dry_run: bool) -
         if a.reason == "unchanged":
             summ.unchanged += 1
         else:
-            summ.skipped += 1
+            summ.no_source += 1   # mac-only / not-actioned — NOT a live skip
         return
 
     if a.kind in ("surface", "update"):

@@ -55,7 +55,9 @@ entries this tool created (`--keep-sessions` leaves the sidebar untouched).
 Three states: **OK** / **Syncing** / **Cannot connect**. A failed sync shows a **Retry**
 button (no automatic immediate retry); the scheduled tick still runs. Completion shows a
 summary in the menu and a notification. Legend: `↓` surfaced on Mac · `↑` pushed to Linux ·
-`=` unchanged.
+`=` unchanged · `✎` renamed · `⏭` live session skipped · `⊘` Mac entry with no Linux
+session in scope (orphan — not live). Only genuine `⏭` live skips trigger the "Sync now ·
+N live skipped" nudge.
 
 ## Tests
 
