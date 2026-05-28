@@ -9,8 +9,10 @@
       or set `isArchived=true`? Pin the detection (code handles both).
 
 ## Features
-- [ ] **Session naming**: let each session be given a custom name; surface it in the app
-      sidebar and sync the title both ways. (requested 2026-05-28)
+- [x] **Session naming / two-way rename**: rename on the Mac app writes a custom-title
+      record into the Linux transcript (so `claude --resume` shows it); rename in the
+      terminal flows to the Mac entry. Baseline title tracked in the store; both-changed
+      conflicts resolved last-writer-wins (tie → Mac). (`decide_rename` / `reconcile_titles`)
 
 ## Packaging
 - [x] `py2app` build of the `.app` bundle (LSUIElement, bundle the assets + icns).

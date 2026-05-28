@@ -18,6 +18,7 @@ class SideState:
 class Record:
     uuid: str
     cwd: str = ""
+    title: str = ""                     # last-synced title — baseline for rename detection
     linux: SideState | None = None
     mac: SideState | None = None
     last_synced_ms: int = 0
@@ -37,6 +38,7 @@ class Store:
                 self.records[uuid] = Record(
                     uuid=uuid,
                     cwd=d.get("cwd", ""),
+                    title=d.get("title", ""),
                     linux=SideState(**d["linux"]) if d.get("linux") else None,
                     mac=SideState(**d["mac"]) if d.get("mac") else None,
                     last_synced_ms=d.get("last_synced_ms", 0),
@@ -50,6 +52,7 @@ class Store:
         for uuid, r in self.records.items():
             out["records"][uuid] = {
                 "cwd": r.cwd,
+                "title": r.title,
                 "linux": asdict(r.linux) if r.linux else None,
                 "mac": asdict(r.mac) if r.mac else None,
                 "last_synced_ms": r.last_synced_ms,

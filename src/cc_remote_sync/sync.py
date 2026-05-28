@@ -4,6 +4,7 @@ can be unit-tested without touching SSH or the filesystem."""
 from __future__ import annotations
 
 import logging
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,10 +25,13 @@ class Summary:
     deleted: int = 0      # deletions propagated
     unchanged: int = 0    # equals
     skipped: int = 0
+    renamed: int = 0      # titles reconciled either direction
     errors: list[str] = field(default_factory=list)
 
     def line(self) -> str:
         s = f"{self.created}↓ {self.pushed}↑ {self.unchanged}="
+        if self.renamed:
+            s += f" {self.renamed}✎"
         if self.skipped:
             s += f" {self.skipped}⏭"
         if self.deleted:
@@ -66,6 +70,65 @@ def filter_active(
             mac.pop(uuid, None)
             skipped += 1
     return skipped
+
+
+def decide_rename(linux_title, mac_title, stored_title, linux_activity, mac_activity):
+    """Which side gets the new title. Returns (target, title):
+    target == 'mac'   -> Linux changed, push title to the Mac entry
+    target == 'linux' -> Mac changed, push title into the Linux transcript
+    target == 'none'  -> already in sync. Both-changed -> last-writer-wins, tie -> Mac."""
+    lt = linux_title or ""
+    mt = mac_title or ""
+    st = stored_title or ""
+    if lt == mt:
+        return ("none", lt)
+    l_changed = lt != st
+    m_changed = mt != st
+    if m_changed and not l_changed:
+        return ("linux", mt)
+    if l_changed and not m_changed:
+        return ("mac", lt)
+    # both diverged from baseline (or no baseline) -> newest activity wins, tie -> Mac
+    return ("mac", lt) if linux_activity > mac_activity else ("linux", mt)
+
+
+def reconcile_titles(cfg: Config, linux, mac, store: Store, summ: "Summary",
+                     dry_run: bool) -> None:
+    """Two-way rename. Runs before content sync so write_entry uses the resolved
+    title (and never clobbers a Mac rename with a stale Linux title)."""
+    for uuid in set(linux) & set(mac):
+        if store.is_tombstoned(uuid):
+            continue
+        L, M = linux[uuid], mac[uuid]
+        S = store.get(uuid)
+        target, title = decide_rename(L.title, M.title, S.title if S else "",
+                                      L.activity_ms, M.activity_ms)
+        L.title = M.title = title          # resolve on both refs for downstream writes
+        if target == "none":
+            continue
+        log.info("rename %s -> %s (%r)", uuid[:8], target, title)
+        if not dry_run:
+            if target == "mac":
+                index_writer.write_entry(cfg, L)         # Linux won: refresh Mac title
+            else:
+                _push_rename_to_linux(cfg, L, title)     # Mac won: write Linux transcript
+            rec = store.get(uuid) or Record(uuid=uuid, cwd=L.cwd)
+            rec.title = title
+            store.records[uuid] = rec
+        summ.renamed += 1
+
+
+def _push_rename_to_linux(cfg: Config, ref: SessionRef, title: str) -> None:
+    """Append a custom-title record to the Linux transcript (cc uses the last one)
+    and push it back in place, so `claude --resume` shows the new name."""
+    records, _ = schema.read_jsonl(ref.transcript_path)
+    records.append({"type": "custom-title", "customTitle": title, "sessionId": ref.uuid})
+    tmp = paths.STAGING_DIR.parent / f"_rename_{ref.uuid}.jsonl"
+    schema.write_jsonl(tmp, records)
+    remote_rel = f"{paths.REMOTE_PROJECTS}/{ref.slug}/{ref.uuid}.jsonl"
+    ssh.push_file(cfg, tmp, remote_rel)
+    shutil.copy2(tmp, ref.transcript_path)   # keep staging consistent
+    tmp.unlink(missing_ok=True)
 
 
 def plan(
@@ -145,6 +208,14 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False) -> Summary:
     if cfg.skip_active_minutes:
         cutoff = int((time.time() - cfg.skip_active_minutes * 60) * 1000)
         summ.skipped += filter_active(linux, mac, cutoff)
+
+    try:
+        reconcile_titles(cfg, linux, mac, store, summ, dry_run)
+    except ssh.Unreachable:
+        raise
+    except Exception as e:
+        summ.errors.append(f"rename: {e}")
+        log.exception("title reconciliation failed")
 
     actions = plan(linux, mac, store, propagate_deletions=cfg.propagate_deletions != "off")
 
