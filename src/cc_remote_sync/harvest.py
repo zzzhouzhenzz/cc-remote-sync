@@ -40,6 +40,7 @@ def linux_manifest(cfg: Config) -> tuple[dict[str, SessionRef], list[str]]:
             title=meta.title,
             model=meta.model,
             last_activity_ms=last,
+            activity_ms=meta.last_activity_ms,   # transcript-only; NOT file mtime
             turns=meta.turns,
             transcript_path=jsonl,
             content_hash=schema.content_hash(jsonl),
@@ -77,6 +78,7 @@ def mac_manifest(cfg: Config) -> tuple[dict[str, SessionRef], list[str]]:
             title=d.get("title"),
             model=d.get("model"),
             last_activity_ms=d.get("lastActivityAt", 0),
+            activity_ms=d.get("lastActivityAt", 0),
             turns=d.get("completedTurns", 0),
             transcript_path=tpath,
             content_hash=schema.content_hash(tpath) if tpath.exists() else "",

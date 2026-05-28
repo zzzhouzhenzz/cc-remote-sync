@@ -12,10 +12,11 @@ class SessionRef:
     cwd: str
     title: str | None
     model: str | None
-    last_activity_ms: int
+    last_activity_ms: int          # transcript time, or file mtime fallback (display/index)
     turns: int
     transcript_path: Path
     content_hash: str
+    activity_ms: int = 0          # transcript time ONLY (0 if unknown) — the live signal
     schema: str = "unknown"       # "cli" | "desktop" | "unknown"
     archived: bool = False        # mac side only
     slug: str = ""                # linux project dir name

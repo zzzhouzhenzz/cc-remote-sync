@@ -4,10 +4,11 @@ from cc_remote_sync.models import SessionRef
 from cc_remote_sync.sync import filter_active
 
 
-def ref(uuid, last):
+def ref(uuid, last, *, mtime=None):
+    # last = transcript activity (the live signal); mtime simulates a bumped file mtime
     return SessionRef(uuid=uuid, side="linux", cwd="/home/zz/ml", title="t", model="m",
-                      last_activity_ms=last, turns=1,
-                      transcript_path=Path("/tmp/x"), content_hash="h")
+                      last_activity_ms=mtime if mtime is not None else last, activity_ms=last,
+                      turns=1, transcript_path=Path("/tmp/x"), content_hash="h")
 
 
 def test_skips_recently_active_and_keeps_quiet():
@@ -25,3 +26,10 @@ def test_uses_max_activity_across_sides():
     mac = {"u": ref("u", 1000)}
     assert filter_active(linux, mac, cutoff_ms=500) == 1
     assert not linux and not mac
+
+
+def test_ignores_bumped_file_mtime():
+    # transcript old, but file mtime recent (our own write) -> NOT live, not skipped
+    linux = {"u": ref("u", 100, mtime=9999)}
+    assert filter_active(linux, {}, cutoff_ms=500) == 0
+    assert "u" in linux

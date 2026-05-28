@@ -56,9 +56,10 @@ def filter_active(
     sync never races the session you're using. Mutates both dicts; returns count."""
     skipped = 0
     for uuid in set(linux) | set(mac):
+        # use transcript activity only — file mtime is bumped by our own writes
         last = max(
-            linux[uuid].last_activity_ms if uuid in linux else 0,
-            mac[uuid].last_activity_ms if uuid in mac else 0,
+            linux[uuid].activity_ms if uuid in linux else 0,
+            mac[uuid].activity_ms if uuid in mac else 0,
         )
         if last > cutoff_ms:
             linux.pop(uuid, None)
