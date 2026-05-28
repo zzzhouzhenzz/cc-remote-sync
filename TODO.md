@@ -13,8 +13,10 @@
       sidebar and sync the title both ways. (requested 2026-05-28)
 
 ## Packaging
-- [ ] `py2app` build of the `.app` bundle (LSUIElement, bundle the assets + icns).
-- [ ] Launch-at-login (LaunchAgent RunAtLoad or Login Items).
+- [x] `py2app` build of the `.app` bundle (LSUIElement, bundle the assets + icns).
+      `python setup.py py2app` (move pyproject.toml aside during build — py2app
+      rejects PEP 621 `dependencies`). Output: `dist/cc-remote-sync.app`.
+- [x] Launch-at-login via macOS Login Items (hidden). Installed to /Applications.
 
 ## Hardening
 - [ ] Resume-fix "wrong location" case: app-born session stored under a non-cwd-slug dir on

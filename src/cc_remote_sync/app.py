@@ -6,6 +6,7 @@ scheduled tick still fires on its interval (owner approved)."""
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from pathlib import Path
 
@@ -20,10 +21,15 @@ INTERVALS = {"daily": 86400, "6h": 21600, "1h": 3600, "manual": 0}
 
 
 def _asset(name: str) -> str | None:
-    for base in (
+    bases = []
+    res = os.environ.get("RESOURCEPATH")          # set by py2app inside the bundle
+    if res:
+        bases.append(Path(res) / "assets")
+    bases += [
         Path(__file__).resolve().parents[2] / "assets",   # dev checkout
         Path(__file__).resolve().parent / "assets",        # bundled alongside
-    ):
+    ]
+    for base in bases:
         p = base / name
         if p.exists():
             return str(p)

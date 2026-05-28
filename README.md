@@ -37,6 +37,17 @@ cc-remote-sync sync                    # do it
 python -m cc_remote_sync.app           # run the menu-bar app (dev)
 ```
 
+## Build the .app (menu-bar app, launches at login)
+
+```bash
+pip install py2app
+mv pyproject.toml _bak && python setup.py py2app; mv _bak pyproject.toml  # py2app rejects PEP 621 deps
+cp -R dist/cc-remote-sync.app /Applications/
+open /Applications/cc-remote-sync.app
+# add to Login Items (hidden):
+osascript -e 'tell application "System Events" to make login item at end with properties {path:"/Applications/cc-remote-sync.app", hidden:true}'
+```
+
 ## Menu-bar app
 
 Three states: **OK** / **Syncing** / **Cannot connect**. A failed sync shows a **Retry**
