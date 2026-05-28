@@ -55,12 +55,17 @@ entries this tool created (`--keep-sessions` leaves the sidebar untouched).
 Three states: **OK** / **Syncing** / **Cannot connect**. A failed sync shows a **Retry**
 button (no automatic immediate retry); the scheduled tick still runs. Completion shows a
 summary in the menu and a notification. Legend: `↓` surfaced on Mac · `↑` pushed to Linux ·
-`=` unchanged · `✎` renamed · `⤺` app-born entry handed back to the app · `⏭` skipped
-because a live cc process is currently running it · `⊘` Mac entry with no Linux session in
-scope (orphan). "Live" is process-based — a session is skipped only while an actual cc
-process holds it (`~/.claude/sessions/<PID>.json` markers / `--resume` in the process
-table), never merely because it was recently active. Only `⏭` live skips trigger the
-"Sync now · N live skipped" nudge.
+`=` unchanged · `✎` renamed · `⤺` app-born entry handed back to the app · `⏸` a Linux-side
+write was deferred because the session is live · `⊘` Mac entry with no Linux session in
+scope (orphan).
+
+**Live sessions are still surfaced.** An actively-running session always gets its app entry
+(creating it only reads Linux + writes Mac-side, so it never races), so it stays visible and
+startable in the app. We defer only the operations that *write the live transcript on Linux*
+— resume-fix, rename push, delete propagation (`⏸`) — until the session is idle. "Live" is
+process-based: a session counts as active only while a cc process holds it
+(`~/.claude/sessions/<PID>.json` markers) and reports a live status or fresh heartbeat, never
+merely because it was recently active. Deferred writes retry automatically on the next sync.
 
 ## Tests
 

@@ -1,54 +1,29 @@
-"""Live-skip: a session is skipped iff a live cc process is running it (process
-markers), NOT because it was recently active."""
-from pathlib import Path
-
-from cc_remote_sync.models import SessionRef
+"""Live-session detection. A session counts as 'actively running' iff a live cc
+process holds it AND it reports an active status or a fresh heartbeat. Active
+sessions are still SURFACED; only their Linux-writes are deferred (see test_sync_plan)."""
 from cc_remote_sync.ssh import _parse_live
-from cc_remote_sync.sync import filter_active
-
-
-def ref(uuid):
-    return SessionRef(uuid=uuid, side="linux", cwd="/home/zz/ml", title="t", model="m",
-                      last_activity_ms=0, turns=1,
-                      transcript_path=Path("/tmp/x"), content_hash="h")
-
+from cc_remote_sync.sync import active_live
 
 IDLE = 300
 
 
-def test_active_status_is_skipped_even_when_heartbeat_is_old():
-    # 837d107f: busy interactive session whose marker last updated 303s ago -> SKIP
-    linux = {"busy": ref("busy"), "stale": ref("stale"), "idle": ref("idle")}
-    mac = {"busy": ref("busy")}
-    live = {
-        "busy":  {"idle_seconds": 303, "status": "busy", "pid": "12660"},   # active status
-        "stale": {"idle_seconds": 5072, "status": "-", "pid": "5358"},      # no status, idle 84m
-    }
-    skipped = filter_active(linux, mac, live, IDLE)
-    assert skipped == 1
-    assert "busy" not in linux and "busy" not in mac   # active status -> skipped
-    assert "stale" in linux                            # lingering -> synced
-    assert "idle" in linux                             # no process -> synced
+def test_active_status_counts_even_when_heartbeat_old():
+    live = {"busy": {"idle_seconds": 999, "status": "busy", "pid": "1"}}
+    assert active_live(live, IDLE) == {"busy"}
 
 
-def test_no_status_but_fresh_heartbeat_is_skipped():
-    # a status-less marker (old ccd-cli) that DID just heartbeat -> still active -> skip
-    linux = {"u": ref("u")}
-    filter_active(linux, {}, {"u": {"idle_seconds": 40, "status": "-", "pid": "9"}}, IDLE)
-    assert "u" not in linux
+def test_fresh_heartbeat_without_status_counts():
+    live = {"u": {"idle_seconds": 40, "status": "-", "pid": "9"}}
+    assert active_live(live, IDLE) == {"u"}
 
 
-def test_no_status_and_stale_heartbeat_is_synced():
-    linux = {"u": ref("u")}
-    filter_active(linux, {}, {"u": {"idle_seconds": 5072, "status": "-", "pid": "9"}}, IDLE)
-    assert "u" in linux  # alive but no status + idle 84min -> not actively running -> synced
+def test_stale_no_status_is_not_active():
+    live = {"stale": {"idle_seconds": 5072, "status": "-", "pid": "5358"}}
+    assert active_live(live, IDLE) == set()
 
 
-def test_no_process_is_never_skipped():
-    # the user's e1493430 case: used 4 min ago, detached, no process -> NOT skipped
-    linux = {"e1493430": ref("e1493430")}
-    assert filter_active(linux, {}, live={}, max_idle_seconds=IDLE) == 0
-    assert "e1493430" in linux
+def test_empty_live_is_empty():
+    assert active_live({}, IDLE) == set()
 
 
 # --- live-session probe parsing (pure): "<uuid> <idle> <status> <kind> <pid>" ---

@@ -37,6 +37,27 @@ def test_app_born_session_is_not_surfaced_but_resume_fixed():
     assert kinds(acts, "u") == {"resume_fix"}
 
 
+def test_live_cli_session_is_still_surfaced():
+    # the user's point: an actively-running terminal session must still get an app
+    # entry (surface) so it's visible/startable — surfacing is Mac-side, never races
+    acts = plan({"u": ref("u", "linux")}, {}, store_with(),
+                propagate_deletions=True, live={"u"})
+    assert kinds(acts, "u") == {"surface"}
+
+
+def test_live_app_born_resume_fix_is_deferred():
+    # writing a CLI copy to a live transcript would race -> defer until idle
+    acts = plan({"u": ref("u", "linux", schema="desktop", app_born=True)}, {}, store_with(),
+                propagate_deletions=True, live={"u"})
+    assert kinds(acts, "u") == {"defer"}
+
+
+def test_live_delete_to_linux_is_deferred():
+    s = store_with(Record(uuid="u", linux=SideState(hash="h"), mac=SideState(hash="h")))
+    acts = plan({"u": ref("u", "linux")}, {}, s, propagate_deletions=True, live={"u"})
+    assert kinds(acts, "u") == {"defer"}    # don't soft-delete a running session
+
+
 def test_app_born_already_cli_resumable_is_left_alone():
     # app-born already in CLI schema: nothing to do (in the app + terminal-resumable)
     acts = plan({"u": ref("u", "linux", schema="cli", app_born=True)}, {}, store_with(),

@@ -23,7 +23,7 @@ class Summary:
     pushed: int = 0       # resume-fix copies sent to Linux (up arrow)
     deleted: int = 0      # deletions propagated
     unchanged: int = 0    # equals
-    skipped: int = 0      # LIVE sessions skipped (active within the window)
+    deferred: int = 0     # Linux-write deferred because the session is live (surfaced anyway)
     no_source: int = 0    # Mac entries with no Linux session in scope (orphans) — not live
     renamed: int = 0      # titles reconciled either direction
     relinquished: int = 0  # app-born entries handed back to the app (un-hijacked)
@@ -35,8 +35,8 @@ class Summary:
             s += f" {self.renamed}✎"
         if self.relinquished:
             s += f" {self.relinquished}⤺"
-        if self.skipped:
-            s += f" {self.skipped}⏭"      # live
+        if self.deferred:
+            s += f" {self.deferred}⏸"      # live: Linux-write deferred
         if self.no_source:
             s += f" {self.no_source}⊘"    # mac-only, no Linux source
         if self.deleted:
@@ -56,30 +56,19 @@ class Action:
     reason: str = ""
 
 
-def filter_active(
-    linux: dict[str, SessionRef],
-    mac: dict[str, SessionRef],
-    live: dict[str, dict],
-    max_idle_seconds: int,
-) -> int:
-    """Drop sessions a cc process is ACTIVELY running, so a sync never races a
-    session in use. "Active" = the marker reports a live status (busy/waiting/...)
-    OR it heartbeated within max_idle_seconds. A process that is alive but reports
-    no status and hasn't heartbeated (a stale/lingering ccd-cli), or a session with
-    no process at all, is NOT skipped. Mutates both dicts; returns count."""
-    skipped = 0
-    for uuid in sorted(set(linux) | set(mac)):
-        info = live.get(uuid)
-        if not info:
-            continue
+def active_live(live: dict[str, dict], max_idle_seconds: int) -> set[str]:
+    """Sessions a cc process is ACTIVELY running: marker reports a live status
+    (busy/waiting/...) OR it heartbeated within max_idle_seconds. A process that is
+    alive but reports no status and hasn't heartbeated (a stale/lingering ccd-cli) is
+    NOT considered active. We still SURFACE active sessions (creating the app entry is
+    safe — it only reads Linux and writes Mac-side); we only DEFER operations that
+    write to the live transcript on Linux (resume-fix, rename push, delete)."""
+    out: set[str] = set()
+    for uuid, info in live.items():
         has_status = info.get("status") not in ("-", "", None)
-        if has_status or info["idle_seconds"] <= max_idle_seconds:
-            log.info("skip %s — active cc process (pid=%s status=%s last-active=%ss)",
-                     uuid[:8], info.get("pid"), info.get("status"), info["idle_seconds"])
-            linux.pop(uuid, None)
-            mac.pop(uuid, None)
-            skipped += 1
-    return skipped
+        if has_status or info.get("idle_seconds", 1 << 30) <= max_idle_seconds:
+            out.add(uuid)
+    return out
 
 
 def decide_rename(linux_title, mac_title, stored_title, linux_activity, mac_activity):
@@ -103,9 +92,10 @@ def decide_rename(linux_title, mac_title, stored_title, linux_activity, mac_acti
 
 
 def reconcile_titles(cfg: Config, linux, mac, store: Store, summ: "Summary",
-                     dry_run: bool) -> None:
+                     dry_run: bool, live: set[str] = frozenset()) -> None:
     """Two-way rename. Runs before content sync so write_entry uses the resolved
-    title (and never clobbers a Mac rename with a stale Linux title)."""
+    title (and never clobbers a Mac rename with a stale Linux title). A rename that
+    must WRITE the Linux transcript (Mac won) is deferred while the session is live."""
     for uuid in set(linux) & set(mac):
         if store.is_tombstoned(uuid):
             continue
@@ -113,6 +103,10 @@ def reconcile_titles(cfg: Config, linux, mac, store: Store, summ: "Summary",
         S = store.get(uuid)
         target, title = decide_rename(L.title, M.title, S.title if S else "",
                                       L.activity_ms, M.activity_ms)
+        if target == "linux" and uuid in live:
+            log.info("defer rename %s -> linux (live)", uuid[:8])
+            summ.deferred += 1
+            continue                          # don't write a live transcript; retry when idle
         L.title = M.title = title          # resolve on both refs for downstream writes
         if target == "none":
             continue
@@ -147,7 +141,10 @@ def plan(
     store: Store,
     *,
     propagate_deletions: bool,
+    live: set[str] = frozenset(),
 ) -> list[Action]:
+    """`live` = sessions an active cc process is running. We still surface them
+    (Mac-side, safe) but DEFER any Linux-write op (resume-fix, delete) for them."""
     actions: list[Action] = []
     uuids = set(linux) | set(mac) | set(store.records)
 
@@ -168,7 +165,10 @@ def plan(
         # have hijacked in an earlier version.
         if L and L.app_born:
             if L.schema == "desktop":
-                actions.append(Action("resume_fix", uuid, L, "app-born: make terminal-resumable"))
+                if uuid in live:
+                    actions.append(Action("defer", uuid, L, "live: defer resume-fix"))
+                else:
+                    actions.append(Action("resume_fix", uuid, L, "app-born: make terminal-resumable"))
             if M:
                 actions.append(Action("relinquish", uuid, L, "app-born: hand back to the app"))
             continue
@@ -179,12 +179,14 @@ def plan(
         if L and not M:
             if synced_before and S and S.mac:
                 # was on Mac, user removed it there -> delete on Linux
-                if propagate_deletions:
-                    actions.append(Action("delete_linux", uuid, L, "removed in Mac app"))
-                else:
+                if not propagate_deletions:
                     actions.append(Action("noop", uuid, L, "mac-deleted, propagation off"))
+                elif uuid in live:
+                    actions.append(Action("defer", uuid, L, "live: defer delete-to-Linux"))
+                else:
+                    actions.append(Action("delete_linux", uuid, L, "removed in Mac app"))
             else:
-                actions.append(Action("surface", uuid, L, "new CLI session"))
+                actions.append(Action("surface", uuid, L, "new CLI session"))  # safe while live
             continue
 
         if M and not L:
@@ -196,7 +198,9 @@ def plan(
 
         if L and M:
             if M.archived:
-                if propagate_deletions:
+                if propagate_deletions and uuid in live:
+                    actions.append(Action("defer", uuid, L, "live: defer archive-delete"))
+                elif propagate_deletions:
                     actions.append(Action("delete_linux", uuid, L, "archived in Mac app"))
                 continue
             changed = not (S and S.linux and S.linux.hash == L.content_hash)
@@ -220,19 +224,21 @@ def run(cfg: Config, store: Store, *, dry_run: bool = False) -> Summary:
     mac, e2 = harvest.mac_manifest(cfg)
     summ.errors += e1 + e2
 
+    live_set: set[str] = set()
     if cfg.skip_live:
-        live = ssh.live_sessions(cfg)   # sessions with a live, heartbeating cc process
-        summ.skipped += filter_active(linux, mac, live, cfg.live_idle_seconds)
+        # sessions an active cc process is running — still surfaced, but Linux-writes deferred
+        live_set = active_live(ssh.live_sessions(cfg), cfg.live_idle_seconds)
 
     try:
-        reconcile_titles(cfg, linux, mac, store, summ, dry_run)
+        reconcile_titles(cfg, linux, mac, store, summ, dry_run, live_set)
     except ssh.Unreachable:
         raise
     except Exception as e:
         summ.errors.append(f"rename: {e}")
         log.exception("title reconciliation failed")
 
-    actions = plan(linux, mac, store, propagate_deletions=cfg.propagate_deletions != "off")
+    actions = plan(linux, mac, store,
+                   propagate_deletions=cfg.propagate_deletions != "off", live=live_set)
 
     for a in actions:
         try:
@@ -263,6 +269,11 @@ def _apply(cfg: Config, store: Store, a: Action, summ: Summary, dry_run: bool) -
             summ.unchanged += 1
         else:
             summ.no_source += 1   # mac-only / not-actioned — NOT a live skip
+        return
+
+    if a.kind == "defer":
+        log.info("defer %s (%s)", a.uuid, a.reason)
+        summ.deferred += 1
         return
 
     if a.kind in ("surface", "update"):

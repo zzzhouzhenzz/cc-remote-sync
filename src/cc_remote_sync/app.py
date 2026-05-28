@@ -112,13 +112,13 @@ class CCRemoteSync(rumps.App):
         self._busy = False
         if kind == "ok":
             self._set_state("ok", "✓ " + payload.line())
-            if payload.skipped:
-                # a session was live and got skipped -> nudge manual sync
-                self.action_item.title = f"Sync now · {payload.skipped} live skipped"
+            if payload.deferred:
+                # session surfaced, but a Linux-side write was deferred (live) -> nudge
+                self.action_item.title = f"Sync now · {payload.deferred} deferred (live)"
                 rumps.notification(
                     "cc-remote-sync", "Sync complete",
-                    f"{payload.line()}\n{payload.skipped} live session(s) skipped — "
-                    "Sync now once they're idle.")
+                    f"{payload.line()}\n{payload.deferred} live session(s): Linux update "
+                    "deferred — Sync now once they're idle.")
             else:
                 rumps.notification("cc-remote-sync", "Sync complete", payload.line())
         elif kind == "error":
